@@ -1,0 +1,12 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "8787:8787"
+    env_file:
+      - apps/api/.env
+    environment:
+      PORT: "8787"
+    restart: unless-stopped

@@ -67,12 +67,16 @@ Sign in as the owner → **Admin → VRChat connection** to authenticate the sha
 
 ## Deploy
 
-### API (VPS)
+### API (Docker / VPS)
 
-1. Build: `pnpm --filter @vrchat-quicklookup/api build` (after `pnpm install`).
-2. Run with Node 20+: `pnpm --filter @vrchat-quicklookup/api start` (or `node --env-file=.env dist/index.js` from `apps/api`).
-3. Put behind HTTPS (Caddy/nginx). Set `FRONTEND_ORIGIN` to your CDN origin (exact URL).
-4. Ensure `DATABASE_URL`, `JWT_SECRET`, and `VRCHAT_CONTACT` are set. Seed owner once with `pnpm seed:owner`.
+```bash
+# from repo root; uses apps/api/.env
+docker compose up -d --build
+```
+
+Or without Docker: `pnpm --filter @vrchat-quicklookup/api build` then `pnpm --filter @vrchat-quicklookup/api start`. Put behind HTTPS (Caddy/nginx). Set `FRONTEND_ORIGIN` to your CDN origin (exact URL). Seed once with `pnpm seed:owner` (or run the seed script against the same `DATABASE_URL`).
+
+Ensure `DATABASE_URL`, `JWT_SECRET`, and `VRCHAT_CONTACT` are set in `apps/api/.env`.
 
 ### Frontend (Netlify / CDN)
 
