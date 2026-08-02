@@ -1,0 +1,14 @@
+[build]
+  command = "pnpm install && pnpm --filter @vrchat-quicklookup/shared build && pnpm --filter @vrchat-quicklookup/web build"
+  publish = "apps/web/dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # Set in Netlify UI (Site settings → Environment variables):
+  # VITE_API_BASE_URL=https://api.yourdomain.com
+
+# SPA fallback so React Router paths work on refresh
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

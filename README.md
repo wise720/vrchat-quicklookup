@@ -74,11 +74,15 @@ Sign in as the owner → **Admin → VRChat connection** to authenticate the sha
 3. Put behind HTTPS (Caddy/nginx). Set `FRONTEND_ORIGIN` to your CDN origin (exact URL).
 4. Ensure `DATABASE_URL`, `JWT_SECRET`, and `VRCHAT_CONTACT` are set. Seed owner once with `pnpm seed:owner`.
 
-### Frontend (CDN)
+### Frontend (Netlify / CDN)
 
-1. Set `VITE_API_BASE_URL` to the public API URL.
-2. `pnpm --filter @vrchat-quicklookup/web build`
-3. Upload `apps/web/dist` to any static host (Cloudflare Pages, S3, nginx, etc.).
+Connect the GitHub repo in Netlify. Build settings are in `netlify.toml`.
+
+1. In Netlify, set env var `VITE_API_BASE_URL` to your public API URL (e.g. `https://api.yourdomain.com`).
+2. Deploy. Publish output is `apps/web/dist`.
+3. On the API VPS, set `FRONTEND_ORIGIN` to the Netlify site URL (exact origin, e.g. `https://your-site.netlify.app` or your custom domain).
+
+Manual/static alternative: `pnpm --filter @vrchat-quicklookup/web build` and upload `apps/web/dist`.
 
 ## API surface
 
