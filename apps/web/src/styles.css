@@ -21,22 +21,22 @@
 }
 
 [data-theme="dark"] {
-  --bg: #121a17;
-  --surface: #1b2622;
-  --ink: #e6efea;
-  --muted: #9aada4;
-  --border: #31423b;
-  --accent: #3dba96;
-  --accent-ink: #062218;
-  --warn: #e6b422;
-  --warn-bg: #2f2610;
-  --problem: #f07167;
-  --problem-bg: #2f1614;
-  --ok: #3dba96;
-  --avatar-fallback: #2a3a34;
-  --glow: #1a332b;
-  --wash-top: #15201c;
-  --wash-bottom: #101714;
+  --bg: #141414;
+  --surface: #1c1c1c;
+  --ink: #e8e8e8;
+  --muted: #9a9a9a;
+  --border: #333333;
+  --accent: #c45c52;
+  --accent-ink: #1a1211;
+  --warn: #d4a017;
+  --warn-bg: #2a2412;
+  --problem: #d96b63;
+  --problem-bg: #2a1614;
+  --ok: #8a9a8e;
+  --avatar-fallback: #2a2a2a;
+  --glow: #222222;
+  --wash-top: #171717;
+  --wash-bottom: #101010;
   color-scheme: dark;
 }
 
@@ -87,6 +87,30 @@ button[type="submit"],
   background: var(--accent);
   color: var(--accent-ink);
   border-color: transparent;
+}
+
+[data-theme="dark"] button[type="submit"],
+[data-theme="dark"] .actions > button:first-child {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--accent);
+}
+
+[data-theme="dark"] button[type="submit"]:hover:not(:disabled),
+[data-theme="dark"] .actions > button:first-child:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+[data-theme="dark"] .admin-icon.active {
+  color: var(--ink);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+}
+
+[data-theme="dark"] .admin-icon:hover,
+[data-theme="dark"] .theme-toggle:hover {
+  color: var(--ink);
+  border-color: var(--accent);
 }
 
 button:disabled {
