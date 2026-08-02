@@ -2,13 +2,15 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/components/auth-provider";
 import { RequireAuth } from "@/components/require-auth";
+import { apiFetch } from "@/lib/client/session";
 import type {
   FilterConfig,
   GroupListEntry,
   GroupsCheckConfig,
   NewAccountCheckConfig,
-} from "@/lib/filters/config";
+} from "@/lib/filters/schema";
 
 type CheckMeta = {
   id: string;
@@ -29,6 +31,7 @@ type GroupHit = {
 
 function AdminPage() {
   const router = useRouter();
+  const { isAdmin, loading: authLoading } = useAuth();
   const [config, setConfig] = useState<FilterConfig | null>(null);
   const [checks, setChecks] = useState<CheckMeta[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -41,10 +44,16 @@ function AdminPage() {
   const [groupSearching, setGroupSearching] = useState(false);
   const [addSeverity, setAddSeverity] = useState<"warn" | "problem">("warn");
 
+  useEffect(() => {
+    if (!authLoading && !isAdmin) {
+      router.replace("/");
+    }
+  }, [authLoading, isAdmin, router]);
+
   const load = useCallback(async () => {
     setError(null);
     try {
-      const res = await fetch("/api/admin/filters");
+      const res = await apiFetch("/api/admin/filters");
       const data = (await res.json()) as {
         config?: FilterConfig;
         checks?: CheckMeta[];
@@ -52,6 +61,10 @@ function AdminPage() {
       };
       if (res.status === 401) {
         router.replace("/signin");
+        return;
+      }
+      if (res.status === 403) {
+        router.replace("/");
         return;
       }
       if (!res.ok) throw new Error(data.error || "Failed to load filters");
@@ -65,10 +78,11 @@ function AdminPage() {
   }, [router]);
 
   useEffect(() => {
+    if (authLoading || !isAdmin) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/admin/filters");
+        const res = await apiFetch("/api/admin/filters");
         if (cancelled) return;
         const data = (await res.json()) as {
           config?: FilterConfig;
@@ -78,6 +92,10 @@ function AdminPage() {
         if (cancelled) return;
         if (res.status === 401) {
           router.replace("/signin");
+          return;
+        }
+        if (res.status === 403) {
+          router.replace("/");
           return;
         }
         if (!res.ok) throw new Error(data.error || "Failed to load filters");
@@ -94,14 +112,22 @@ function AdminPage() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [authLoading, isAdmin, router]);
+
+  if (authLoading || !isAdmin) {
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-16 text-[var(--muted)]">
+        Checking admin access…
+      </main>
+    );
+  }
 
   async function save(next: FilterConfig) {
     setSaving(true);
     setError(null);
     setMessage(null);
     try {
-      const res = await fetch("/api/admin/filters", {
+      const res = await apiFetch("/api/admin/filters", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ config: next }),
@@ -109,6 +135,10 @@ function AdminPage() {
       const data = (await res.json()) as { config?: FilterConfig; error?: string };
       if (res.status === 401) {
         router.replace("/signin");
+        return;
+      }
+      if (res.status === 403) {
+        router.replace("/");
         return;
       }
       if (!res.ok) throw new Error(data.error || "Save failed");
@@ -161,7 +191,7 @@ function AdminPage() {
     setGroupSearching(true);
     setError(null);
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/admin/groups/search?q=${encodeURIComponent(q)}`,
       );
       const data = (await res.json()) as { groups?: GroupHit[]; error?: string };

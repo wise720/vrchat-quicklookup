@@ -3,18 +3,27 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth, type AuthUser } from "@/components/auth-provider";
-import type { TwoFactorMethod } from "@/lib/vrchat/types";
+import type { SessionCookies, TwoFactorMethod } from "@/lib/vrchat/types";
 
 export default function SignInPage() {
   const router = useRouter();
-  const { setUser, refresh } = useAuth();
+  const { setSession, refresh } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [methods, setMethods] = useState<TwoFactorMethod[] | null>(null);
   const [method, setMethod] = useState<TwoFactorMethod>("totp");
+  const [pendingAuthCookie, setPendingAuthCookie] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  async function finishSignIn(user: AuthUser, session: SessionCookies) {
+    setSession(session, user);
+    await refresh();
+    router.replace("/");
+  }
 
   async function onLogin(e: FormEvent) {
     e.preventDefault();
@@ -29,7 +38,9 @@ export default function SignInPage() {
       const data = (await res.json()) as {
         status?: string;
         methods?: TwoFactorMethod[];
+        pendingAuthCookie?: string;
         user?: AuthUser;
+        session?: SessionCookies;
         error?: string;
       };
       if (!res.ok) throw new Error(data.error || "Sign in failed");
@@ -37,12 +48,13 @@ export default function SignInPage() {
       if (data.status === "twoFactorRequired" && data.methods) {
         setMethods(data.methods);
         setMethod(data.methods[0] ?? "totp");
+        setPendingAuthCookie(data.pendingAuthCookie ?? null);
         return;
       }
 
-      if (data.user) setUser(data.user);
-      await refresh();
-      router.replace("/");
+      if (data.user && data.session) {
+        await finishSignIn(data.user, data.session);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign in failed");
     } finally {
@@ -58,13 +70,21 @@ export default function SignInPage() {
       const res = await fetch("/api/auth/2fa", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, method }),
+        body: JSON.stringify({
+          code,
+          method,
+          pendingAuthCookie,
+        }),
       });
-      const data = (await res.json()) as { user?: AuthUser; error?: string };
+      const data = (await res.json()) as {
+        user?: AuthUser;
+        session?: SessionCookies;
+        error?: string;
+      };
       if (!res.ok) throw new Error(data.error || "Verification failed");
-      if (data.user) setUser(data.user);
-      await refresh();
-      router.replace("/");
+      if (data.user && data.session) {
+        await finishSignIn(data.user, data.session);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Verification failed");
     } finally {
@@ -83,7 +103,8 @@ export default function SignInPage() {
           VRChat Quick Lookup
         </p>
         <p className="mt-2 text-[var(--muted)]">
-          Sign in with your VRChat account to look up users for moderation.
+          Sign in with your VRChat account. Your session stays in this browser
+          only.
         </p>
 
         {!methods ? (
@@ -163,6 +184,7 @@ export default function SignInPage() {
               className="text-sm text-[var(--muted)] underline"
               onClick={() => {
                 setMethods(null);
+                setPendingAuthCookie(null);
                 setCode("");
               }}
             >

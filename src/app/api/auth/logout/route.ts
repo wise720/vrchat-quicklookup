@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { jsonError } from "@/lib/api";
 import { logout } from "@/lib/vrchat/client";
-import { clearPendingTwoFactor } from "@/lib/vrchat/pending-2fa";
+import { sessionFromRequest } from "@/lib/vrchat/session";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    await logout();
-    await clearPendingTwoFactor();
+    const session = sessionFromRequest(request);
+    if (session) {
+      await logout(session);
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     return jsonError(err, "Logout failed");

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { RequireAuth } from "@/components/require-auth";
 import { WarningBadges } from "@/components/warning-badges";
+import { apiFetch } from "@/lib/client/session";
 import type { VrchatSeverity } from "@/lib/vrchat/types";
 
 type LookupResponse = {
@@ -75,7 +76,7 @@ function UserDetail() {
       setBusy(true);
       setError(null);
       try {
-        const res = await fetch(`/api/users/${encodeURIComponent(userId)}`);
+        const res = await apiFetch(`/api/users/${encodeURIComponent(userId)}`);
         const json = (await res.json()) as LookupResponse & {
           error?: string;
           code?: string;

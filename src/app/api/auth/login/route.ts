@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError, publicUser } from "@/lib/api";
 import { loginWithPassword } from "@/lib/vrchat/client";
-import { clearPendingTwoFactor, savePendingTwoFactor } from "@/lib/vrchat/pending-2fa";
 
 export async function POST(request: Request) {
   try {
@@ -23,20 +22,17 @@ export async function POST(request: Request) {
     const result = await loginWithPassword(username, password);
 
     if (result.status === "twoFactorRequired") {
-      await savePendingTwoFactor({
-        authCookie: result.pendingAuthCookie!,
-        methods: result.methods,
-      });
       return NextResponse.json({
         status: "twoFactorRequired",
         methods: result.methods,
+        pendingAuthCookie: result.pendingAuthCookie,
       });
     }
 
-    await clearPendingTwoFactor();
     return NextResponse.json({
       status: "ok",
       user: publicUser(result.user),
+      session: result.session,
     });
   } catch (err) {
     return jsonError(err, "Login failed");

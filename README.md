@@ -1,106 +1,65 @@
 # VRChat Quick Lookup
 
-Local moderation helper: sign in with VRChat, look up users, and surface **warn** / **problem** labels from configurable filters.
+Cloud-friendly moderation helper: sign in with VRChat (session stays in the **browser**), look up users, and surface **warn** / **problem** labels from filters stored in **Neon Postgres**.
 
-Binds to `127.0.0.1` by default so your VRChat session cookie stays on your machine.
+Tagged baseline: `v0.1.0` (local disk session). Current app is `0.2.0` (client session + Neon).
 
 ## Setup
+
+1. Create a free Neon project: [https://console.neon.tech](https://console.neon.tech)
+2. Copy the connection string into `.env.local`
+3. Set your VRChat User-Agent contact and admin user id
 
 ```bash
 pnpm install
 cp .env.example .env.local
 ```
 
-Edit `.env.local` and set a real contact VRChat can reach (email or URL). Placeholders like `example.com` are rejected:
-
 ```env
 VRCHAT_CONTACT=you@yourdomain.com
+DATABASE_URL=postgresql://...@...neon.tech/neondb?sslmode=require
+ADMIN_VRCHAT_USER_IDS=usr_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-This becomes the User-Agent `VRChatQuickLookup/0.1.0 you@yourdomain.com`. To override the full string:
+Or seed admin into the DB (after `DATABASE_URL` is set):
 
-```env
-VRCHAT_USER_AGENT=VRChatQuickLookup/0.1.0 you@yourdomain.com
+```bash
+pnpm seed:admin usr_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
 
-## Run
+Only seeded / env-listed VRChat users see the **Admin** nav and can change filters.
+
+## Run locally
 
 ```bash
 pnpm dev
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000), then **Sign in with VRChat** (username/password + 2FA if enabled).
+## Deploy (e.g. Vercel)
 
-## Features
+1. Push the repo and import into Vercel (or similar).
+2. Set env vars: `VRCHAT_CONTACT`, `DATABASE_URL`, `ADMIN_VRCHAT_USER_IDS`.
+3. Deploy. Tables (`filter_config`, `admin_users`) are created automatically on first use.
 
-- **Sign in with VRChat** — session cookie persisted under `data/` so restarts do not burn new sessions
-- **Lookup** — search by display name or paste a `usr_…` id
-- **Warnings** — checks run against VRChat API response data (profile + groups)
-- **Admin** — enable/disable checks; manage group **warn** and **problem** lists
+## How auth works
 
-## Admin: group filters
+- Sign-in proxies to VRChat; **auth cookies are returned to the client** and stored in `localStorage`.
+- Each API call sends `X-VRChat-Auth` (and optional `X-VRChat-TwoFactorAuth`).
+- The server does **not** persist VRChat sessions — suitable for serverless hosts.
+- Filter config / warn+problem group lists live in Neon.
 
-1. Open **Admin**
-2. Search groups by name/short code or paste a `grp_…` id
-3. Add each group as **warn** or **problem**
-4. On the next user lookup, membership in those groups produces matching labels
+## Admin filters
 
-Filter config is stored at `data/filters.json` (gitignored).
+1. Sign in as a seeded admin VRChat user.
+2. Open **Admin** — enable/disable checks; manage group warn/problem lists.
+3. Lookups for everyone use that shared Neon config.
 
 ## Register a new check
 
-Checks are TypeScript modules registered at load time.
+1. Add `src/lib/checks/my-check.ts` and call `registerCheck({...})`.
+2. Import it from [`src/lib/checks/index.ts`](src/lib/checks/index.ts).
+3. Optionally extend defaults in [`src/lib/filters/schema.ts`](src/lib/filters/schema.ts).
 
-1. Create `src/lib/checks/my-check.ts`:
+## Security note
 
-```ts
-import { registerCheck } from "@/lib/checks/types";
-
-registerCheck({
-  id: "my-check",
-  name: "My check",
-  description: "What this flags and why.",
-  run(ctx) {
-    // Inspect ctx.user / ctx.groups / ctx.config
-    if (!ctx.user.bio?.includes("example")) return [];
-    return [
-      {
-        id: "my-check:example",
-        checkId: "my-check",
-        severity: "warn", // or "problem"
-        label: "Example pattern in bio",
-        detail: "Optional detail for moderators",
-      },
-    ];
-  },
-});
-```
-
-2. Import it from [`src/lib/checks/index.ts`](src/lib/checks/index.ts):
-
-```ts
-import "@/lib/checks/my-check";
-```
-
-3. Optionally add default settings in [`src/lib/filters/config.ts`](src/lib/filters/config.ts) (`DEFAULT_FILTER_CONFIG`) so Admin can toggle/configure them.
-
-No UI rewrite is required for code-only checks; they appear in Admin once registered. Tunable lists (like groups) should read/write `ctx.config`.
-
-## API sketch
-
-| Route | Purpose |
-| --- | --- |
-| `POST /api/auth/login` | VRChat username/password |
-| `POST /api/auth/2fa` | Complete TOTP / email OTP |
-| `GET /api/auth/me` | Current session user |
-| `POST /api/auth/logout` | Clear session |
-| `GET /api/users/search?q=` | Search users |
-| `GET /api/users/[userId]` | User + groups + warnings |
-| `GET/PUT /api/admin/filters` | Load/save filter config |
-| `GET /api/admin/groups/search?q=` | Resolve groups for Admin |
-
-## Notes
-
-- Credentials and VRChat cookies never leave the Next.js server process (stored under `data/`).
-- If the session expires, API routes return `401` and the UI sends you back to sign-in.
-- This tool is for local moderation aid only; follow VRChat's terms and use a dedicated User-Agent with contact info.
+Admin gating is intentionally light (match VRChat user id). Do not treat this as hardened multi-tenant security yet.

@@ -4,6 +4,7 @@ import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { RequireAuth } from "@/components/require-auth";
+import { apiFetch } from "@/lib/client/session";
 
 type SearchUser = {
   id: string;
@@ -36,7 +37,7 @@ function LookupPage() {
     setError(null);
     setSearched(true);
     try {
-      const res = await fetch(`/api/users/search?q=${encodeURIComponent(q)}`);
+      const res = await apiFetch(`/api/users/search?q=${encodeURIComponent(q)}`);
       const data = (await res.json()) as {
         results?: SearchUser[];
         error?: string;

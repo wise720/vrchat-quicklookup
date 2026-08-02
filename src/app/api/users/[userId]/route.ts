@@ -4,19 +4,21 @@ import { runChecks } from "@/lib/checks";
 import "@/lib/checks";
 import { loadFilterConfig } from "@/lib/filters/config";
 import { getUser, getUserGroups } from "@/lib/vrchat/client";
+import { requireSessionFromRequest } from "@/lib/vrchat/session";
 
 type Params = { params: Promise<{ userId: string }> };
 
-export async function GET(_request: Request, { params }: Params) {
+export async function GET(request: Request, { params }: Params) {
   try {
+    const session = requireSessionFromRequest(request);
     const { userId } = await params;
     if (!userId) {
       return NextResponse.json({ error: "userId required" }, { status: 400 });
     }
 
     const [user, groups, config] = await Promise.all([
-      getUser(userId),
-      getUserGroups(userId),
+      getUser(session, userId),
+      getUserGroups(session, userId),
       loadFilterConfig(),
     ]);
 

@@ -18,7 +18,7 @@ function avatarUrl(user: {
 }
 
 export function AppHeader() {
-  const { user, loading, signOut } = useAuth();
+  const { user, isAdmin, loading, signOut } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -33,17 +33,25 @@ export function AppHeader() {
     <header className="border-b border-[var(--border)] bg-[var(--surface)]/90 backdrop-blur">
       <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-3">
         <div className="flex items-center gap-6">
-          <Link href="/" className="font-[family-name:var(--font-display)] text-lg tracking-tight text-[var(--ink)]">
+          <Link
+            href="/"
+            className="font-[family-name:var(--font-display)] text-lg tracking-tight text-[var(--ink)]"
+          >
             VRChat Quick Lookup
           </Link>
           {user && (
             <nav className="flex gap-3 text-sm">
-              <NavLink href="/" active={pathname === "/" || pathname.startsWith("/user")}>
+              <NavLink
+                href="/"
+                active={pathname === "/" || pathname.startsWith("/user")}
+              >
                 Lookup
               </NavLink>
-              <NavLink href="/admin" active={pathname.startsWith("/admin")}>
-                Admin
-              </NavLink>
+              {isAdmin && (
+                <NavLink href="/admin" active={pathname.startsWith("/admin")}>
+                  Admin
+                </NavLink>
+              )}
             </nav>
           )}
         </div>

@@ -55,6 +55,11 @@ export type VrchatSession = {
   updatedAt: string;
 };
 
+export type SessionCookies = {
+  authCookie: string;
+  twoFactorAuthCookie?: string;
+};
+
 export type TwoFactorMethod = "totp" | "otp" | "emailotp";
 
 export type LoginResult =

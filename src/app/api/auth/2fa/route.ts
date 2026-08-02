@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import { jsonError, publicUser } from "@/lib/api";
 import { verifyTwoFactor } from "@/lib/vrchat/client";
-import {
-  clearPendingTwoFactor,
-  loadPendingTwoFactor,
-} from "@/lib/vrchat/pending-2fa";
 import type { TwoFactorMethod } from "@/lib/vrchat/types";
 
 export async function POST(request: Request) {
@@ -12,44 +8,32 @@ export async function POST(request: Request) {
     const body = (await request.json()) as {
       code?: string;
       method?: TwoFactorMethod;
+      pendingAuthCookie?: string;
     };
 
-    const pending = await loadPendingTwoFactor();
-    if (!pending) {
+    const authCookie = body.pendingAuthCookie?.trim() ?? "";
+    const code = body.code?.trim() ?? "";
+    if (!authCookie) {
       return NextResponse.json(
-        { error: "No pending two-factor login. Sign in again." },
+        { error: "Missing pending auth cookie — sign in again" },
         { status: 400 },
       );
     }
-
-    const code = body.code?.trim() ?? "";
     if (!code) {
       return NextResponse.json({ error: "Code is required" }, { status: 400 });
     }
 
-    const method =
-      body.method && pending.methods.includes(body.method)
-        ? body.method
-        : pending.methods[0];
-
-    if (!method) {
-      return NextResponse.json(
-        { error: "No two-factor method available" },
-        { status: 400 },
-      );
-    }
-
-    const user = await verifyTwoFactor({
-      authCookie: pending.authCookie,
+    const method = body.method ?? "totp";
+    const { user, session } = await verifyTwoFactor({
+      authCookie,
       code,
       method,
     });
 
-    await clearPendingTwoFactor();
-
     return NextResponse.json({
       status: "ok",
       user: publicUser(user),
+      session,
     });
   } catch (err) {
     return jsonError(err, "Two-factor verification failed");

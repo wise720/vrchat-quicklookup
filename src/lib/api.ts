@@ -2,9 +2,15 @@ import { NextResponse } from "next/server";
 import { VrchatApiError, VrchatAuthError } from "@/lib/vrchat/client";
 
 export function jsonError(err: unknown, fallback = "Unexpected error") {
-  if (err instanceof VrchatAuthError) {
+  if (
+    err instanceof VrchatAuthError ||
+    (err instanceof Error && err.name === "VrchatAuthError")
+  ) {
     return NextResponse.json(
-      { error: err.message, code: "auth_required" },
+      {
+        error: err instanceof Error ? err.message : "Unauthorized",
+        code: "auth_required",
+      },
       { status: 401 },
     );
   }

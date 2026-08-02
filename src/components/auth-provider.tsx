@@ -9,6 +9,13 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import {
+  apiFetch,
+  clearClientSession,
+  loadClientSession,
+  saveClientSession,
+  type ClientSession,
+} from "@/lib/client/session";
 
 export type AuthUser = {
   id: string;
@@ -20,41 +27,65 @@ export type AuthUser = {
 
 type AuthState = {
   user: AuthUser | null;
+  isAdmin: boolean;
   loading: boolean;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
-  setUser: (user: AuthUser | null) => void;
+  setSession: (session: ClientSession, user: AuthUser, isAdmin?: boolean) => void;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
 
-async function fetchMe(): Promise<AuthUser | null> {
-  const res = await fetch("/api/auth/me");
-  if (!res.ok) return null;
-  const data = (await res.json()) as { user: AuthUser };
-  return data.user;
+async function fetchMe(): Promise<{ user: AuthUser; isAdmin: boolean } | null> {
+  if (!loadClientSession()) return null;
+  const res = await apiFetch("/api/auth/me");
+  if (!res.ok) {
+    if (res.status === 401) clearClientSession();
+    return null;
+  }
+  const data = (await res.json()) as { user: AuthUser; isAdmin?: boolean };
+  return { user: data.user, isAdmin: !!data.isAdmin };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     const next = await fetchMe();
-    setUser(next);
+    setUser(next?.user ?? null);
+    setIsAdmin(next?.isAdmin ?? false);
     setLoading(false);
   }, []);
 
   const signOut = useCallback(async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
+    try {
+      await apiFetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      // ignore
+    }
+    clearClientSession();
     setUser(null);
+    setIsAdmin(false);
   }, []);
+
+  const setSession = useCallback(
+    (session: ClientSession, nextUser: AuthUser, admin = false) => {
+      saveClientSession(session);
+      setUser(nextUser);
+      setIsAdmin(admin);
+      setLoading(false);
+    },
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
     fetchMe().then((next) => {
       if (cancelled) return;
-      setUser(next);
+      setUser(next?.user ?? null);
+      setIsAdmin(next?.isAdmin ?? false);
       setLoading(false);
     });
     return () => {
@@ -63,8 +94,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, loading, refresh, signOut, setUser }),
-    [user, loading, refresh, signOut],
+    () => ({ user, isAdmin, loading, refresh, signOut, setSession }),
+    [user, isAdmin, loading, refresh, signOut, setSession],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
