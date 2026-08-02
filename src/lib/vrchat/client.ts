@@ -72,16 +72,35 @@ function userAgent(): string {
 }
 
 function extractCookie(setCookies: string[], name: string): string | undefined {
+  const want = name.toLowerCase();
   for (const line of setCookies) {
     const first = line.split(";")[0]?.trim();
     if (!first) continue;
     const eq = first.indexOf("=");
     if (eq <= 0) continue;
-    const key = first.slice(0, eq).trim();
-    const value = first.slice(eq + 1).trim();
-    if (key === name && value) return value;
+    const key = first.slice(0, eq).trim().toLowerCase();
+    let value = first.slice(eq + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"')) {
+      value = value.slice(1, -1);
+    }
+    if (key === want && value) return value;
   }
   return undefined;
+}
+
+/** Accept raw token or `auth=token` / quoted forms from the client. */
+export function normalizeAuthCookie(raw: string): string {
+  let value = raw.trim();
+  if (value.startsWith('"') && value.endsWith('"')) {
+    value = value.slice(1, -1);
+  }
+  if (/^auth=/i.test(value)) {
+    value = value.replace(/^auth=/i, "").trim();
+  }
+  if (value.startsWith('"') && value.endsWith('"')) {
+    value = value.slice(1, -1);
+  }
+  return value;
 }
 
 export function normalizeTwoFactorMethod(
@@ -143,30 +162,30 @@ function vrchatHttps(
   options: RequestOptions = {},
 ): Promise<VrchatHttpResult> {
   const headers: Record<string, string> = {
-    "User-Agent": userAgent(),
-    Accept: "application/json",
-    Host: API_HOST,
+    "user-agent": userAgent(),
+    accept: "application/json",
   };
 
   if (options.basicAuth) {
-    headers.Authorization = `Basic ${options.basicAuth}`;
+    headers.authorization = `Basic ${options.basicAuth}`;
   }
 
   if (options.session?.authCookie) {
-    headers.Cookie = cookieHeader(options.session);
+    headers.cookie = cookieHeader(options.session);
   }
 
   const payload =
     options.body !== undefined ? JSON.stringify(options.body) : undefined;
   if (payload !== undefined) {
-    headers["Content-Type"] = "application/json";
-    headers["Content-Length"] = Buffer.byteLength(payload).toString();
+    headers["content-type"] = "application/json";
+    headers["content-length"] = Buffer.byteLength(payload).toString();
   }
 
   return new Promise((resolve, reject) => {
     const req = https.request(
       {
         hostname: API_HOST,
+        servername: API_HOST,
         path: `${API_PREFIX}${path}`,
         method: options.method ?? "GET",
         headers,
@@ -293,12 +312,46 @@ export async function loginWithPassword(
   };
 }
 
+export async function loginWithPasswordAndTwoFactor(params: {
+  username: string;
+  password: string;
+  code: string;
+  method?: TwoFactorMethod | string;
+}): Promise<{ user: VrchatUser; session: SessionCookies }> {
+  /**
+   * Must run login + 2FA in the same serverless invocation.
+   * Splitting them across requests often fails on Vercel because the pending
+   * auth cookie from password login is tied to that request's egress path.
+   */
+  const login = await loginWithPassword(params.username, params.password);
+
+  if (login.status === "ok") {
+    return { user: login.user, session: login.session };
+  }
+
+  return verifyTwoFactor({
+    authCookie: login.pendingAuthCookie,
+    code: params.code,
+    method: params.method ?? login.methods[0] ?? "totp",
+  });
+}
+
 export async function verifyTwoFactor(params: {
   authCookie: string;
   code: string;
   method: TwoFactorMethod | string;
 }): Promise<{ user: VrchatUser; session: SessionCookies }> {
   const method = normalizeTwoFactorMethod(params.method);
+  const authCookie = normalizeAuthCookie(params.authCookie);
+  if (!authCookie) {
+    throw new VrchatApiError(
+      "Missing pending auth cookie — sign in again",
+      400,
+    );
+  }
+
+  const pendingSession = asSession({ authCookie });
+
   const pathByMethod: Record<TwoFactorMethod, string> = {
     totp: "/auth/twofactorauth/totp/verify",
     otp: "/auth/twofactorauth/otp/verify",
@@ -309,15 +362,20 @@ export async function verifyTwoFactor(params: {
   const { body, setCookies, status, ok } = await vrchatFetch(path, {
     method: "POST",
     body: { code: params.code.trim() },
-    session: asSession({ authCookie: params.authCookie }),
+    session: pendingSession,
     allowUnauthorized: true,
   });
 
   if (!ok) {
     throw new VrchatApiError(
-      errorMessage(body, "Two-factor verification failed"),
+      errorMessage(
+        body,
+        status === 401
+          ? "VRChat rejected 2FA (wrong code or expired login session). Sign in again and use a new authenticator code."
+          : "Two-factor verification failed",
+      ),
       status,
-      body,
+      { step: "verify", body },
     );
   }
 
@@ -329,9 +387,12 @@ export async function verifyTwoFactor(params: {
     )
   ) {
     throw new VrchatApiError(
-      errorMessage(body, "Invalid two-factor code"),
+      errorMessage(
+        body,
+        "Invalid two-factor code — wait for a new code and try again",
+      ),
       401,
-      body,
+      { step: "verify", body },
     );
   }
 
@@ -340,17 +401,27 @@ export async function verifyTwoFactor(params: {
     throw new VrchatApiError(
       "2FA succeeded but twoFactorAuth cookie was missing from VRChat response.",
       502,
-      { setCookieCount: setCookies.length },
+      { step: "cookies", setCookieCount: setCookies.length },
     );
   }
 
   const session: SessionCookies = {
-    authCookie: params.authCookie,
+    authCookie,
     twoFactorAuthCookie,
   };
 
-  const user = await getCurrentUser(session);
-  return { user, session };
+  try {
+    const user = await getCurrentUser(session);
+    return { user, session };
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Failed to load user after 2FA";
+    throw new VrchatApiError(
+      `2FA verified but session incomplete: ${message}`,
+      401,
+      { step: "session" },
+    );
+  }
 }
 
 export async function getCurrentUser(

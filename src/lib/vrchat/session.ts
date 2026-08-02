@@ -1,9 +1,19 @@
 import type { VrchatSession } from "@/lib/vrchat/types";
 
 export function cookieHeader(session: VrchatSession): string {
-  const parts = [`auth=${session.authCookie}`];
+  // Importing normalize here would cycle; keep formatting local
+  let auth = session.authCookie.trim();
+  if (/^auth=/i.test(auth)) auth = auth.replace(/^auth=/i, "").trim();
+  if (auth.startsWith('"') && auth.endsWith('"')) auth = auth.slice(1, -1);
+
+  const parts = [`auth=${auth}`];
   if (session.twoFactorAuthCookie) {
-    parts.push(`twoFactorAuth=${session.twoFactorAuthCookie}`);
+    let tfa = session.twoFactorAuthCookie.trim();
+    if (/^twofactorauth=/i.test(tfa)) {
+      tfa = tfa.replace(/^twofactorauth=/i, "").trim();
+    }
+    if (tfa.startsWith('"') && tfa.endsWith('"')) tfa = tfa.slice(1, -1);
+    parts.push(`twoFactorAuth=${tfa}`);
   }
   return parts.join("; ");
 }

@@ -16,8 +16,12 @@ export function jsonError(err: unknown, fallback = "Unexpected error") {
   }
   if (err instanceof VrchatApiError) {
     return NextResponse.json(
-      { error: err.message, code: "vrchat_error" },
-      { status: err.status },
+      {
+        error: err.message,
+        code: "vrchat_error",
+        detail: err.body ?? null,
+      },
+      { status: err.status >= 400 && err.status < 600 ? err.status : 500 },
     );
   }
   if (err instanceof Error) {

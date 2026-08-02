@@ -1,54 +1,64 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { jsonError, publicUser } from "@/lib/api";
 import {
+  loginWithPasswordAndTwoFactor,
   normalizeTwoFactorMethod,
-  verifyTwoFactor,
 } from "@/lib/vrchat/client";
 import type { TwoFactorMethod } from "@/lib/vrchat/types";
 
 export const runtime = "nodejs";
 
-const PENDING_COOKIE = "vrc_pending_auth";
-
+/**
+ * Completes 2FA by re-doing password login + TOTP in one serverless invocation.
+ * Reusing a pending auth cookie from a previous request often fails on Vercel
+ * (VRChat returns 401 Missing Credentials) due to different egress IPs.
+ */
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
       code?: string;
       method?: TwoFactorMethod | string;
+      username?: string;
+      password?: string;
       pendingAuthCookie?: string;
     };
 
-    const jar = await cookies();
-    const authCookie =
-      body.pendingAuthCookie?.trim() ||
-      jar.get(PENDING_COOKIE)?.value?.trim() ||
-      "";
+    const username = body.username?.trim() ?? "";
+    const password = body.password ?? "";
     const code = body.code?.trim() ?? "";
-    if (!authCookie) {
+    const method = normalizeTwoFactorMethod(body.method);
+
+    if (!username || !password) {
       return NextResponse.json(
-        { error: "Missing pending auth cookie — sign in again" },
+        {
+          error:
+            "Username and password are required for 2FA on this host. Go back and sign in again.",
+        },
         { status: 400 },
       );
     }
     if (!code) {
       return NextResponse.json({ error: "Code is required" }, { status: 400 });
     }
+    if (method === "totp" && !/^\d{6}$/.test(code)) {
+      return NextResponse.json(
+        { error: "Authenticator codes are 6 digits" },
+        { status: 400 },
+      );
+    }
 
-    const method = normalizeTwoFactorMethod(body.method);
-    const { user, session } = await verifyTwoFactor({
-      authCookie,
+    const { user, session } = await loginWithPasswordAndTwoFactor({
+      username,
+      password,
       code,
       method,
     });
 
-    const res = NextResponse.json({
+    return NextResponse.json({
       status: "ok",
       user: publicUser(user),
       session,
     });
-    res.cookies.delete(PENDING_COOKIE);
-    return res;
   } catch (err) {
     return jsonError(err, "Two-factor verification failed");
   }

@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import { useAuth, type AuthUser } from "@/components/auth-provider";
 import type { SessionCookies, TwoFactorMethod } from "@/lib/vrchat/types";
 
+const TWO_FACTOR_LABELS: Record<TwoFactorMethod, string> = {
+  totp: "Authenticator app",
+  otp: "Recovery code",
+  emailotp: "Email",
+};
+
 export default function SignInPage() {
   const router = useRouter();
   const { setSession, refresh } = useAuth();
@@ -13,9 +19,6 @@ export default function SignInPage() {
   const [code, setCode] = useState("");
   const [methods, setMethods] = useState<TwoFactorMethod[] | null>(null);
   const [method, setMethod] = useState<TwoFactorMethod>("totp");
-  const [pendingAuthCookie, setPendingAuthCookie] = useState<string | null>(
-    null,
-  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -38,7 +41,6 @@ export default function SignInPage() {
       const data = (await res.json()) as {
         status?: string;
         methods?: TwoFactorMethod[];
-        pendingAuthCookie?: string;
         user?: AuthUser;
         session?: SessionCookies;
         error?: string;
@@ -48,7 +50,6 @@ export default function SignInPage() {
       if (data.status === "twoFactorRequired" && data.methods) {
         setMethods(data.methods);
         setMethod(data.methods[0] ?? "totp");
-        setPendingAuthCookie(data.pendingAuthCookie ?? null);
         return;
       }
 
@@ -67,13 +68,15 @@ export default function SignInPage() {
     setBusy(true);
     setError(null);
     try {
+      // Re-send username/password so login+2FA happen in one serverless call.
       const res = await fetch("/api/auth/2fa", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code,
           method,
-          pendingAuthCookie,
+          username,
+          password,
         }),
       });
       const data = (await res.json()) as {
@@ -143,10 +146,17 @@ export default function SignInPage() {
           <form onSubmit={onVerify} className="mt-8 flex flex-col gap-4">
             <p className="text-sm text-[var(--muted)]">
               Enter your two-factor code to finish signing in.
+              {methods.length === 1 && (
+                <>
+                  {" "}
+                  Using{" "}
+                  {TWO_FACTOR_LABELS[methods[0]]?.toLowerCase() ?? methods[0]}.
+                </>
+              )}
             </p>
             {methods.length > 1 && (
               <label className="flex flex-col gap-1 text-sm">
-                <span className="text-[var(--muted)]">Method</span>
+                <span className="text-[var(--muted)]">Verification method</span>
                 <select
                   className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
                   value={method}
@@ -154,14 +164,20 @@ export default function SignInPage() {
                 >
                   {methods.map((m) => (
                     <option key={m} value={m}>
-                      {m}
+                      {TWO_FACTOR_LABELS[m] ?? m}
                     </option>
                   ))}
                 </select>
               </label>
             )}
             <label className="flex flex-col gap-1 text-sm">
-              <span className="text-[var(--muted)]">Authentication code</span>
+              <span className="text-[var(--muted)]">
+                {method === "emailotp"
+                  ? "Email code"
+                  : method === "otp"
+                    ? "Recovery code"
+                    : "Authenticator code"}
+              </span>
               <input
                 className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 tracking-widest text-[var(--ink)] outline-none focus:border-[var(--accent)]"
                 value={code}
@@ -184,7 +200,6 @@ export default function SignInPage() {
               className="text-sm text-[var(--muted)] underline"
               onClick={() => {
                 setMethods(null);
-                setPendingAuthCookie(null);
                 setCode("");
               }}
             >
