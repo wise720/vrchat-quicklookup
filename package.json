@@ -1,29 +1,14 @@
 {
   "name": "vrchat-quicklookup",
-  "version": "0.2.0",
   "private": true,
+  "version": "0.3.0",
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "seed:admin": "node --env-file=.env.local scripts/seed-admin.mjs"
-  },
-  "dependencies": {
-    "@neondatabase/serverless": "^1.1.0",
-    "next": "16.2.12",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "dotenv": "^17.4.2",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.12",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "predev": "pnpm --filter @vrchat-quicklookup/shared build",
+    "dev": "pnpm -r --parallel --filter @vrchat-quicklookup/api --filter @vrchat-quicklookup/web run dev",
+    "dev:api": "pnpm --filter @vrchat-quicklookup/shared build && pnpm --filter @vrchat-quicklookup/api dev",
+    "dev:web": "pnpm --filter @vrchat-quicklookup/shared build && pnpm --filter @vrchat-quicklookup/web dev",
+    "build": "pnpm --filter @vrchat-quicklookup/shared build && pnpm --filter @vrchat-quicklookup/api build && pnpm --filter @vrchat-quicklookup/web build",
+    "seed:owner": "pnpm --filter @vrchat-quicklookup/shared build && pnpm --filter @vrchat-quicklookup/api seed:owner"
   }
 }
