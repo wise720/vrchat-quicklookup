@@ -72,26 +72,57 @@ function userAgent(): string {
 function parseSetCookies(res: Response): string[] {
   const headers = res.headers as Headers & {
     getSetCookie?: () => string[];
+    raw?: () => Record<string, string | string[]>;
   };
+
   if (typeof headers.getSetCookie === "function") {
-    return headers.getSetCookie();
+    const list = headers.getSetCookie();
+    if (list.length > 0) return list;
   }
+
+  try {
+    const raw = headers.raw?.()?.["set-cookie"];
+    if (Array.isArray(raw) && raw.length > 0) return raw;
+    if (typeof raw === "string" && raw) return [raw];
+  } catch {
+    // ignore — raw() not available in all runtimes
+  }
+
   const single = res.headers.get("set-cookie");
-  return single ? [single] : [];
+  if (!single) return [];
+
+  // Multiple cookies may be joined with commas; Expires= also has commas.
+  return single.split(/,(?=\s*[^;=]+=[^;]+)/).map((s) => s.trim());
 }
 
 function extractCookie(setCookies: string[], name: string): string | undefined {
   for (const line of setCookies) {
-    const match = line.match(new RegExp(`(?:^|,\\s*)${name}=([^;]+)`));
-    if (match?.[1]) return match[1];
-  }
-  for (const line of setCookies) {
     const first = line.split(";")[0]?.trim();
-    if (first?.startsWith(`${name}=`)) {
-      return first.slice(name.length + 1);
-    }
+    if (!first) continue;
+    const eq = first.indexOf("=");
+    if (eq <= 0) continue;
+    const key = first.slice(0, eq).trim();
+    const value = first.slice(eq + 1).trim();
+    if (key === name && value) return value;
   }
   return undefined;
+}
+
+export function normalizeTwoFactorMethod(
+  method: string | undefined | null,
+): TwoFactorMethod {
+  const m = (method ?? "totp").toLowerCase().replace(/[_-]/g, "");
+  if (m === "emailotp" || m === "email") return "emailotp";
+  if (m === "otp") return "otp";
+  return "totp";
+}
+
+export function normalizeTwoFactorMethods(
+  methods: string[] | undefined,
+): TwoFactorMethod[] {
+  if (!methods?.length) return ["totp"];
+  const normalized = methods.map((m) => normalizeTwoFactorMethod(m));
+  return [...new Set(normalized)];
 }
 
 async function parseJson(res: Response): Promise<unknown> {
@@ -212,14 +243,14 @@ export async function loginWithPassword(
   if (isTwoFactorResponse(body)) {
     if (!authCookie) {
       throw new VrchatApiError(
-        "Two-factor required but no auth cookie was returned",
+        "Two-factor required but no auth cookie was returned (Set-Cookie missing). Retry sign-in.",
         401,
         body,
       );
     }
     return {
       status: "twoFactorRequired",
-      methods: body.requiresTwoFactorAuth,
+      methods: normalizeTwoFactorMethods(body.requiresTwoFactorAuth),
       pendingAuthCookie: authCookie,
     };
   }
@@ -242,19 +273,30 @@ export async function loginWithPassword(
 export async function verifyTwoFactor(params: {
   authCookie: string;
   code: string;
-  method: TwoFactorMethod;
+  method: TwoFactorMethod | string;
 }): Promise<{ user: VrchatUser; session: SessionCookies }> {
+  const method = normalizeTwoFactorMethod(params.method);
   const pathByMethod: Record<TwoFactorMethod, string> = {
     totp: "/auth/twofactorauth/totp/verify",
     otp: "/auth/twofactorauth/otp/verify",
     emailotp: "/auth/twofactorauth/emailotp/verify",
   };
 
-  const { body, setCookies } = await vrchatFetch(pathByMethod[params.method], {
+  const path = pathByMethod[method];
+  const { body, setCookies, res } = await vrchatFetch(path, {
     method: "POST",
     body: { code: params.code.trim() },
     session: asSession({ authCookie: params.authCookie }),
+    allowUnauthorized: true,
   });
+
+  if (!res.ok) {
+    throw new VrchatApiError(
+      errorMessage(body, "Two-factor verification failed"),
+      res.status,
+      body,
+    );
+  }
 
   if (
     !(
@@ -264,18 +306,24 @@ export async function verifyTwoFactor(params: {
     )
   ) {
     throw new VrchatApiError(
-      errorMessage(body, "Two-factor verification failed"),
+      errorMessage(body, "Invalid two-factor code"),
       401,
       body,
     );
   }
 
-  const twoFactorAuthCookie =
-    extractCookie(setCookies, "twoFactorAuth") ?? undefined;
+  const twoFactorAuthCookie = extractCookie(setCookies, "twoFactorAuth");
+  if (!twoFactorAuthCookie) {
+    throw new VrchatApiError(
+      "2FA succeeded but twoFactorAuth cookie was missing from VRChat response. This is often a host/runtime Set-Cookie issue — try again.",
+      502,
+      { setCookies },
+    );
+  }
 
   const session: SessionCookies = {
     authCookie: params.authCookie,
-    ...(twoFactorAuthCookie ? { twoFactorAuthCookie } : {}),
+    twoFactorAuthCookie,
   };
 
   const user = await getCurrentUser(session);

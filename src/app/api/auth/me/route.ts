@@ -4,6 +4,8 @@ import { isAdminUserId } from "@/lib/db";
 import { getCurrentUser } from "@/lib/vrchat/client";
 import { requireSessionFromRequest } from "@/lib/vrchat/session";
 
+export const runtime = "nodejs";
+
 export async function GET(request: Request) {
   try {
     const session = requireSessionFromRequest(request);

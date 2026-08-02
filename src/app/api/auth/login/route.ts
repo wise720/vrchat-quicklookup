@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { jsonError, publicUser } from "@/lib/api";
 import { loginWithPassword } from "@/lib/vrchat/client";
 
+export const runtime = "nodejs";
+
+const PENDING_COOKIE = "vrc_pending_auth";
+
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
@@ -22,18 +26,28 @@ export async function POST(request: Request) {
     const result = await loginWithPassword(username, password);
 
     if (result.status === "twoFactorRequired") {
-      return NextResponse.json({
+      const res = NextResponse.json({
         status: "twoFactorRequired",
         methods: result.methods,
         pendingAuthCookie: result.pendingAuthCookie,
       });
+      res.cookies.set(PENDING_COOKIE, result.pendingAuthCookie, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: 10 * 60,
+      });
+      return res;
     }
 
-    return NextResponse.json({
+    const res = NextResponse.json({
       status: "ok",
       user: publicUser(result.user),
       session: result.session,
     });
+    res.cookies.delete(PENDING_COOKIE);
+    return res;
   } catch (err) {
     return jsonError(err, "Login failed");
   }
