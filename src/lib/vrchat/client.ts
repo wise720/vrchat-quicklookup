@@ -1,3 +1,4 @@
+import https from "node:https";
 import { cookieHeader } from "@/lib/vrchat/session";
 import type {
   TwoFactorMethod,
@@ -10,7 +11,8 @@ import type {
 
 export type { SessionCookies };
 
-const API_BASE = "https://api.vrchat.cloud/api/1";
+const API_HOST = "api.vrchat.cloud";
+const API_PREFIX = "/api/1";
 
 export class VrchatApiError extends Error {
   status: number;
@@ -69,32 +71,6 @@ function userAgent(): string {
   return ua;
 }
 
-function parseSetCookies(res: Response): string[] {
-  const headers = res.headers as Headers & {
-    getSetCookie?: () => string[];
-    raw?: () => Record<string, string | string[]>;
-  };
-
-  if (typeof headers.getSetCookie === "function") {
-    const list = headers.getSetCookie();
-    if (list.length > 0) return list;
-  }
-
-  try {
-    const raw = headers.raw?.()?.["set-cookie"];
-    if (Array.isArray(raw) && raw.length > 0) return raw;
-    if (typeof raw === "string" && raw) return [raw];
-  } catch {
-    // ignore — raw() not available in all runtimes
-  }
-
-  const single = res.headers.get("set-cookie");
-  if (!single) return [];
-
-  // Multiple cookies may be joined with commas; Expires= also has commas.
-  return single.split(/,(?=\s*[^;=]+=[^;]+)/).map((s) => s.trim());
-}
-
 function extractCookie(setCookies: string[], name: string): string | undefined {
   for (const line of setCookies) {
     const first = line.split(";")[0]?.trim();
@@ -125,8 +101,7 @@ export function normalizeTwoFactorMethods(
   return [...new Set(normalized)];
 }
 
-async function parseJson(res: Response): Promise<unknown> {
-  const text = await res.text();
+function parseBodyText(text: string): unknown {
   if (!text) return null;
   try {
     return JSON.parse(text) as unknown;
@@ -152,13 +127,25 @@ type RequestOptions = {
   allowUnauthorized?: boolean;
 };
 
-async function vrchatFetch(
+type VrchatHttpResult = {
+  status: number;
+  ok: boolean;
+  body: unknown;
+  setCookies: string[];
+};
+
+/**
+ * Use Node https (not global fetch) so Set-Cookie headers are preserved.
+ * Next/Vercel fetch often drops or folds upstream Set-Cookie, which breaks 2FA.
+ */
+function vrchatHttps(
   path: string,
   options: RequestOptions = {},
-): Promise<{ res: Response; body: unknown; setCookies: string[] }> {
+): Promise<VrchatHttpResult> {
   const headers: Record<string, string> = {
     "User-Agent": userAgent(),
     Accept: "application/json",
+    Host: API_HOST,
   };
 
   if (options.basicAuth) {
@@ -169,32 +156,68 @@ async function vrchatFetch(
     headers.Cookie = cookieHeader(options.session);
   }
 
-  if (options.body !== undefined) {
+  const payload =
+    options.body !== undefined ? JSON.stringify(options.body) : undefined;
+  if (payload !== undefined) {
     headers["Content-Type"] = "application/json";
+    headers["Content-Length"] = Buffer.byteLength(payload).toString();
   }
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: options.method ?? "GET",
-    headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
-    cache: "no-store",
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: API_HOST,
+        path: `${API_PREFIX}${path}`,
+        method: options.method ?? "GET",
+        headers,
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf8");
+          const body = parseBodyText(text);
+          const setCookieHeader = res.headers["set-cookie"];
+          const setCookies = Array.isArray(setCookieHeader)
+            ? setCookieHeader
+            : setCookieHeader
+              ? [setCookieHeader]
+              : [];
+          const status = res.statusCode ?? 0;
+          resolve({
+            status,
+            ok: status >= 200 && status < 300,
+            body,
+            setCookies,
+          });
+        });
+      },
+    );
+
+    req.on("error", reject);
+    if (payload !== undefined) req.write(payload);
+    req.end();
   });
+}
 
-  const setCookies = parseSetCookies(res);
-  const body = await parseJson(res);
+async function vrchatFetch(
+  path: string,
+  options: RequestOptions = {},
+): Promise<VrchatHttpResult> {
+  const result = await vrchatHttps(path, options);
 
-  if (!res.ok && !(options.allowUnauthorized && res.status === 401)) {
-    if (res.status === 401) {
-      throw new VrchatAuthError(errorMessage(body, "Unauthorized"));
+  if (!result.ok && !(options.allowUnauthorized && result.status === 401)) {
+    if (result.status === 401) {
+      throw new VrchatAuthError(errorMessage(result.body, "Unauthorized"));
     }
     throw new VrchatApiError(
-      errorMessage(body, `VRChat API error (${res.status})`),
-      res.status,
-      body,
+      errorMessage(result.body, `VRChat API error (${result.status})`),
+      result.status,
+      result.body,
     );
   }
 
-  return { res, body, setCookies };
+  return result;
 }
 
 function encodeBasicAuth(username: string, password: string): string {
@@ -204,7 +227,7 @@ function encodeBasicAuth(username: string, password: string): string {
 
 function isTwoFactorResponse(
   body: unknown,
-): body is { requiresTwoFactorAuth: TwoFactorMethod[] } {
+): body is { requiresTwoFactorAuth: string[] } {
   return (
     !!body &&
     typeof body === "object" &&
@@ -233,7 +256,7 @@ export async function loginWithPassword(
       pendingAuthCookie: string;
     }
 > {
-  const { body, setCookies, res } = await vrchatFetch("/auth/user", {
+  const { body, setCookies, status, ok } = await vrchatFetch("/auth/user", {
     basicAuth: encodeBasicAuth(username, password),
     allowUnauthorized: true,
   });
@@ -245,7 +268,7 @@ export async function loginWithPassword(
       throw new VrchatApiError(
         "Two-factor required but no auth cookie was returned (Set-Cookie missing). Retry sign-in.",
         401,
-        body,
+        { body, setCookieCount: setCookies.length },
       );
     }
     return {
@@ -255,10 +278,10 @@ export async function loginWithPassword(
     };
   }
 
-  if (!res.ok || !authCookie) {
+  if (!ok || !authCookie) {
     throw new VrchatApiError(
       errorMessage(body, "Login failed — check username and password"),
-      res.status || 401,
+      status || 401,
       body,
     );
   }
@@ -283,17 +306,17 @@ export async function verifyTwoFactor(params: {
   };
 
   const path = pathByMethod[method];
-  const { body, setCookies, res } = await vrchatFetch(path, {
+  const { body, setCookies, status, ok } = await vrchatFetch(path, {
     method: "POST",
     body: { code: params.code.trim() },
     session: asSession({ authCookie: params.authCookie }),
     allowUnauthorized: true,
   });
 
-  if (!res.ok) {
+  if (!ok) {
     throw new VrchatApiError(
       errorMessage(body, "Two-factor verification failed"),
-      res.status,
+      status,
       body,
     );
   }
@@ -315,9 +338,9 @@ export async function verifyTwoFactor(params: {
   const twoFactorAuthCookie = extractCookie(setCookies, "twoFactorAuth");
   if (!twoFactorAuthCookie) {
     throw new VrchatApiError(
-      "2FA succeeded but twoFactorAuth cookie was missing from VRChat response. This is often a host/runtime Set-Cookie issue — try again.",
+      "2FA succeeded but twoFactorAuth cookie was missing from VRChat response.",
       502,
-      { setCookies },
+      { setCookieCount: setCookies.length },
     );
   }
 
